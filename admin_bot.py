@@ -297,7 +297,8 @@ async def finalize_test(message, state, title, content, keys, t_type):
             try: await u_bot.send_message(u_id, bc_text, parse_mode="HTML"); await asyncio.sleep(0.05)
             except: pass
         await u_bot.session.close()
-        await message.answer(f"📢 <b>{len(users)} kishiga xabar yuborildi!</b>", reply_markup=get_admin_main())
+        menu = await get_user_menu(message.chat.id)
+        await message.answer(f"📢 <b>{len(users)} kishiga xabar yuborildi!</b>", reply_markup=menu, parse_mode="HTML")
     except Exception as e:
         logging.error(f"Saqlashda xato: {e}")
         await message.answer(f"❌ Saqlashda xato: {e}")
@@ -306,8 +307,13 @@ async def finalize_test(message, state, title, content, keys, t_type):
 # --- QOLGANLAR ---
 @dp.callback_query(F.data == "st_global")
 async def stats(callback: CallbackQuery):
+    uid = callback.from_user.id
+    if uid != ADMIN_ID and not await db.is_sub_admin(uid):
+        await callback.answer("⛔ Ruxsat yo'q!", show_alert=True)
+        return
     u, r = await db.get_stats()
-    await callback.message.edit_text(f"📊 <b>Statistika:</b>\n\n👤 Foydalanuvchilar: {u}\n📝 Yechilgan testlar: {r}", reply_markup=get_admin_main())
+    menu = await get_user_menu(uid)
+    await callback.message.edit_text(f"📊 <b>Statistika:</b>\n\n👤 Foydalanuvchilar: {u}\n📝 Yechilgan testlar: {r}", reply_markup=menu, parse_mode="HTML")
 
 @dp.callback_query(F.data == "list_tests")
 async def list_tests(callback: CallbackQuery):
@@ -348,10 +354,15 @@ async def del_t(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "search_user")
 async def show_all_users(callback: CallbackQuery, state: FSMContext):
+    uid = callback.from_user.id
+    if uid != ADMIN_ID and not await db.is_sub_admin(uid):
+        await callback.answer("⛔ Ruxsat yo'q!", show_alert=True)
+        return
     await state.clear()
     users_list = await db.get_all_users_info()
     if not users_list:
-        await callback.message.edit_text("👥 Hozircha foydalanuvchilar yo'q.", reply_markup=get_admin_main())
+        menu = await get_user_menu(uid)
+        await callback.message.edit_text("👥 Hozircha foydalanuvchilar yo'q.", reply_markup=menu)
         return
     
     txt = f"👥 <b>Barcha foydalanuvchilar ({len(users_list)} ta):</b>\n\n"
