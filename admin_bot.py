@@ -325,11 +325,21 @@ async def show_all_users(callback: CallbackQuery, state: FSMContext):
     
     txt = f"👥 <b>Barcha foydalanuvchilar ({len(users_list)} ta):</b>\n\n"
     for i, u in enumerate(users_list[:30], 1):
-        name = u.get('full_name', 'Nomsiz') or 'Nomsiz'
+        full_name = u.get('full_name') or ''
+        username = u.get('username') or ''
         phone = u.get('phone', '-') or '-'
         uid = u.get('user_id', '-')
         reg = u.get('registered_at', '-')
-        txt += f"<b>{i}.</b> 👤 {name}\n   📱 {phone}\n   🆔 <code>{uid}</code>\n   📅 {reg}\n\n"
+        
+        # Ism ko'rsatish: full_name → @username → ID
+        if full_name.strip():
+            display_name = full_name
+        elif username:
+            display_name = f"@{username}"
+        else:
+            display_name = f"ID: {uid}"
+        
+        txt += f"<b>{i}.</b> 👤 {display_name}\n   📱 {phone}\n   🆔 <code>{uid}</code>\n   📅 {reg}\n\n"
     
     if len(users_list) > 30:
         txt += f"<i>...va yana {len(users_list)-30} ta foydalanuvchi</i>"
