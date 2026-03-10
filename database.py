@@ -1,7 +1,11 @@
 import aiosqlite
 import os
 
-DB_PATH = "antigravity.db"
+# Railway persistent volume uchun /data/ papkasi ishlatiladi
+# Lokal ishlab chiqishda joriy papkada saqlanadi
+DATA_DIR = os.getenv("DATA_DIR", "/data")
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_PATH = os.path.join(DATA_DIR, "antigravity.db")
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
