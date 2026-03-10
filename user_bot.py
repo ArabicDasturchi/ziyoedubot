@@ -63,11 +63,19 @@ async def cmd_reset(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("🔄 Profilingiz tozalandi. Endi qaytadan /start bosing.")
 
-async def start_logic(user_id, message_obj, state: FSMContext, is_callback=False):
+async def start_logic(user_id, message_obj, state: FSMContext, is_callback=False, from_user=None):
     """Botning asosiy kirish mantig'i: Kontakt -> Obuna -> Menyu."""
     user = await db.get_user(user_id)
     if not user:
-        await db.add_user(user_id, "", "")
+        # Telegram'dan ism va username ni olamiz
+        tg_name = ""
+        tg_username = ""
+        if from_user:
+            first = from_user.first_name or ""
+            last = from_user.last_name or ""
+            tg_name = f"{first} {last}".strip()
+            tg_username = from_user.username or ""
+        await db.add_user(user_id, tg_username, tg_name)
         user = await db.get_user(user_id)
 
     # 1. Kontakt kiritilganligini tekshirish (MUTLAQ BIRINCHI!)
@@ -114,7 +122,7 @@ async def start_logic(user_id, message_obj, state: FSMContext, is_callback=False
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
-    await start_logic(message.from_user.id, message, state)
+    await start_logic(message.from_user.id, message, state, from_user=message.from_user)
 
 @dp.message(UserStates.waiting_phone, F.contact)
 async def process_phone(message: Message, state: FSMContext):
@@ -128,7 +136,7 @@ async def process_check_sub(callback: CallbackQuery, state: FSMContext):
     if not unsub_list:
         try: await callback.message.delete()
         except: pass
-        await start_logic(callback.from_user.id, callback.message, state, is_callback=True)
+        await start_logic(callback.from_user.id, callback.message, state, is_callback=True, from_user=callback.from_user)
     else:
         await callback.answer(f"❌ Siz hali barcha kanallarga ulanmagansiz!", show_alert=True)
 
