@@ -155,3 +155,10 @@ async def get_all_users():
         async with db.execute("SELECT user_id FROM users") as cursor:
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
+
+async def get_all_users_info():
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT user_id, username, full_name, phone, registered_at FROM users ORDER BY registered_at DESC") as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]

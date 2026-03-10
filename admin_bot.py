@@ -37,7 +37,7 @@ def get_admin_main():
         [InlineKeyboardButton(text="➕ Yangi Test Qo'shish", callback_data="add_test")],
         [InlineKeyboardButton(text="🗂 Testlar Ro'yxati", callback_data="list_tests")],
         [InlineKeyboardButton(text="📢 Reklama Tarqatish", callback_data="st_broadcast")],
-        [InlineKeyboardButton(text="🔍 Foydalanuvchi Qidirish", callback_data="search_user")],
+        [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="search_user")],
         [InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="st_settings"),
          InlineKeyboardButton(text="📊 Statistika", callback_data="st_global")]
     ])
@@ -316,16 +316,28 @@ async def del_t(callback: CallbackQuery):
     await list_tests(callback)
 
 @dp.callback_query(F.data == "search_user")
-async def search_start(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(AdminStates.waiting_user_search); await callback.message.edit_text("🔍 Foydalanuvchi ID sini kiriting:")
-
-@dp.message(AdminStates.waiting_user_search)
-async def bc_search(message: Message, state: FSMContext):
-    if not message.text.isdigit(): await message.answer("⚠️ Faqat raqam kiriting!"); return
-    u = await db.get_user(int(message.text))
-    if u: await message.answer(f"👤 {u['full_name']}\n📱 {u['phone']}\n📅 {u['registered_at']}", reply_markup=get_admin_main())
-    else: await message.answer("❌ Topilmadi.", reply_markup=get_admin_main())
+async def show_all_users(callback: CallbackQuery, state: FSMContext):
     await state.clear()
+    users_list = await db.get_all_users_info()
+    if not users_list:
+        await callback.message.edit_text("👥 Hozircha foydalanuvchilar yo'q.", reply_markup=get_admin_main())
+        return
+    
+    txt = f"👥 <b>Barcha foydalanuvchilar ({len(users_list)} ta):</b>\n\n"
+    for i, u in enumerate(users_list[:30], 1):
+        name = u.get('full_name', 'Nomsiz') or 'Nomsiz'
+        phone = u.get('phone', '-') or '-'
+        uid = u.get('user_id', '-')
+        reg = u.get('registered_at', '-')
+        txt += f"<b>{i}.</b> 👤 {name}\n   📱 {phone}\n   🆔 <code>{uid}</code>\n   📅 {reg}\n\n"
+    
+    if len(users_list) > 30:
+        txt += f"<i>...va yana {len(users_list)-30} ta foydalanuvchi</i>"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_admin")]
+    ])
+    await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
 
 @dp.callback_query(F.data == "st_settings")
 async def show_settings(callback: CallbackQuery):
