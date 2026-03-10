@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+*.db
+node_modules/
+*.zip
+target_pdf.pdf
+target_image.jpg
+temp_bc_*
