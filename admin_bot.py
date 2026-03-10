@@ -317,7 +317,7 @@ async def list_tests(callback: CallbackQuery):
     txt = f"🗂 <b>Barcha testlar ({len(tests)} ta):</b>\n\nQuyidagilardan birini o'chirishingiz mumkin:"
     kb = []
     for i, t in enumerate(tests[:20], 1): # Tartib raqam bilan ko'rsatamiz
-        kb.append([InlineKeyboardButton(text=f"🗑 {i}. {t['title'][:25]}", callback_data=f"del_{t['id']}")])
+        kb.append([InlineKeyboardButton(text=f"🗑 {i}. {t['title'][:25]}", callback_data=f"del_test_{t['id']}")])
     
     if len(tests) > 1:
         kb.append([InlineKeyboardButton(text="💣 BARCHASINI O'CHIRISH", callback_data="confirm_del_all")])
@@ -339,9 +339,9 @@ async def del_all_now(callback: CallbackQuery):
     await callback.answer("💥 Barcha testlar o'chirildi!", show_alert=True)
     await back_to_admin(callback, None)
 
-@dp.callback_query(F.data.startswith("del_"))
+@dp.callback_query(F.data.startswith("del_test_"))
 async def del_t(callback: CallbackQuery):
-    t_id = int(callback.data.split("_")[1])
+    t_id = int(callback.data.split("_")[2])
     await db.delete_test(t_id)
     await callback.answer("✅ Test o'chirildi!")
     await list_tests(callback)
