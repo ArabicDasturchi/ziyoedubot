@@ -45,6 +45,14 @@ async def init_db():
                 value TEXT
             )
         """)
+        # Sub-adminlar jadvali
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS sub_admins (
+                user_id INTEGER PRIMARY KEY,
+                full_name TEXT,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         
         # Sxemani yangilash (Migration)
         try:
@@ -160,5 +168,28 @@ async def get_all_users_info():
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute("SELECT user_id, username, full_name, phone, registered_at FROM users ORDER BY registered_at DESC") as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+# ===== SUB-ADMIN FUNKSIYALARI =====
+async def add_sub_admin(user_id, full_name=""):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT OR REPLACE INTO sub_admins (user_id, full_name) VALUES (?, ?)", (user_id, full_name))
+        await db.commit()
+
+async def remove_sub_admin(user_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM sub_admins WHERE user_id = ?", (user_id,))
+        await db.commit()
+
+async def is_sub_admin(user_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT user_id FROM sub_admins WHERE user_id = ?", (user_id,)) as cursor:
+            return await cursor.fetchone() is not None
+
+async def get_all_sub_admins():
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT user_id, full_name, added_at FROM sub_admins ORDER BY added_at DESC") as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]

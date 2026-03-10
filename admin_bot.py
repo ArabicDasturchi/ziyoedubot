@@ -29,33 +29,64 @@ class AdminStates(StatesGroup):
     waiting_broadcast_text = State()
     waiting_broadcast_photo = State()
     waiting_broadcast_button = State()
-    waiting_user_search = State()
     waiting_setting_value = State()
+    waiting_sub_admin_id = State()
+    waiting_sub_admin_name = State()
 
-def get_admin_main():
+def get_super_admin_menu():
+    """Asosiy admin uchun to'liq menyu"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➕ Yangi Test Qo'shish", callback_data="add_test")],
         [InlineKeyboardButton(text="🗂 Testlar Ro'yxati", callback_data="list_tests")],
+        [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="search_user"),
+         InlineKeyboardButton(text="📊 Statistika", callback_data="st_global")],
         [InlineKeyboardButton(text="📢 Reklama Tarqatish", callback_data="st_broadcast")],
-        [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="search_user")],
-        [InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="st_settings"),
-         InlineKeyboardButton(text="📊 Statistika", callback_data="st_global")]
+        [InlineKeyboardButton(text="👨‍🏫 Sub-Adminlar", callback_data="manage_subadmins"),
+         InlineKeyboardButton(text="⚙️ Sozlamalar", callback_data="st_settings")],
     ])
+
+def get_sub_admin_menu():
+    """Sub-admin (o'qituvchi) uchun cheklangan menyu"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Yangi Test Qo'shish", callback_data="add_test")],
+        [InlineKeyboardButton(text="🗂 Testlar Ro'yxati", callback_data="list_tests")],
+        [InlineKeyboardButton(text="👥 Foydalanuvchilar", callback_data="search_user"),
+         InlineKeyboardButton(text="📊 Statistika", callback_data="st_global")],
+    ])
+
+async def get_user_menu(user_id):
+    """Foydalanuvchi darajasiga qarab menyuni qaytaradi"""
+    if user_id == ADMIN_ID:
+        return get_super_admin_menu()
+    return get_sub_admin_menu()
 
 @dp.message(Command("start"))
 async def start_admin(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
+    uid = message.from_user.id
+    if uid != ADMIN_ID and not await db.is_sub_admin(uid):
+        return
     await state.clear()
-    await message.answer("🛠 <b>Ziyo Admin Panel - Ultra Full</b>", reply_markup=get_admin_main(), parse_mode="HTML")
+    menu = await get_user_menu(uid)
+    prefix = "🔑 <b>Asosiy Admin Panel</b>" if uid == ADMIN_ID else "👨‍🏫 <b>O'qituvchi Panel</b>"
+    await message.answer(prefix, reply_markup=menu, parse_mode="HTML")
 
 @dp.callback_query(F.data == "back_to_admin")
 async def back_to_admin(callback: CallbackQuery, state: FSMContext):
+    uid = callback.from_user.id
+    if uid != ADMIN_ID and not await db.is_sub_admin(uid):
+        return
     await state.clear()
-    await callback.message.edit_text("🛠 <b>Boshqaruv menyusi:</b>", reply_markup=get_admin_main(), parse_mode="HTML")
+    menu = await get_user_menu(uid)
+    prefix = "🔑 <b>Asosiy Admin Panel</b>" if uid == ADMIN_ID else "👨‍🏫 <b>O'qituvchi Panel</b>"
+    await callback.message.edit_text(prefix, reply_markup=menu, parse_mode="HTML")
 
-# --- TEST QO'SHISH ---
+# --- TEST QO'SHISH (Super admin ham, Sub-admin ham qo'sha oladi) ---
 @dp.callback_query(F.data == "add_test")
 async def start_add_test(callback: CallbackQuery, state: FSMContext):
+    uid = callback.from_user.id
+    if uid != ADMIN_ID and not await db.is_sub_admin(uid):
+        await callback.answer("⛔ Ruxsat yo'q!", show_alert=True)
+        return
     await state.set_state(AdminStates.waiting_test_title)
     await callback.message.edit_text("📄 <b>Yangi test nomini kiriting:</b>", parse_mode="HTML")
 
@@ -351,6 +382,9 @@ async def show_all_users(callback: CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "st_settings")
 async def show_settings(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Bu funksiya faqat asosiy admin uchun!", show_alert=True)
+        return
     ch = await db.get_setting("channels")
     text = f"⚙️ <b>Sozlamalar:</b>\n\n📢 Kanallar:\n<code>{ch}</code>"
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -361,54 +395,63 @@ async def show_settings(callback: CallbackQuery):
 
 @dp.callback_query(F.data == "set_ch")
 async def set_ch_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Ruxsat yo'q!", show_alert=True)
+        return
     await state.set_state(AdminStates.waiting_setting_value)
     await callback.message.edit_text("✍️ Yangi kanallarni yuboring (Format: <code>@ch1,@ch2</code>):", parse_mode="HTML")
 
 @dp.message(AdminStates.waiting_setting_value)
 async def process_setting_value(message: Message, state: FSMContext):
     await db.update_setting("channels", message.text.strip())
-    await message.answer("✅ Yangilandi!", reply_markup=get_admin_main()); await state.clear()
+    menu = await get_user_menu(message.from_user.id)
+    await message.answer("✅ Yangilandi!", reply_markup=menu)
+    await state.clear()
 
 @dp.callback_query(F.data == "st_broadcast")
 async def bc_start(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(AdminStates.waiting_broadcast_text); await callback.message.edit_text("📢 Reklama matnini yuboring:")
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Bu funksiya faqat asosiy admin uchun!", show_alert=True)
+        return
+    await state.set_state(AdminStates.waiting_broadcast_text)
+    await callback.message.edit_text("📢 Reklama matnini yuboring:")
 
 @dp.message(AdminStates.waiting_broadcast_text)
 async def bc_tx(message: Message, state: FSMContext):
-    await state.update_data(txt=message.text); await state.set_state(AdminStates.waiting_broadcast_photo); await message.answer("📸 Rasm yoki <code>/skip</code>")
+    await state.update_data(txt=message.text)
+    await state.set_state(AdminStates.waiting_broadcast_photo)
+    await message.answer("📸 Rasm yoki <code>/skip</code>")
 
 @dp.message(AdminStates.waiting_broadcast_photo)
 async def bc_ph(message: Message, state: FSMContext):
     p = message.photo[-1].file_id if message.photo else None
-    
     if p:
-        # User Bot uchun valid file_id olish
         u_bot = Bot(token=os.getenv("USER_BOT_TOKEN"))
         temp_p = f"temp_bc_{p}"
         try:
-            # 1. Yuklab olish
             file = await bot.get_file(p)
             await bot.download_file(file.file_path, temp_p)
-            
-            # 2. Quyida ishlatish uchun qayta yuklash
             from aiogram.types import FSInputFile
             msg = await u_bot.send_photo(ADMIN_ID, FSInputFile(temp_p))
             p = msg.photo[-1].file_id
-            
-            # 3. O'chirish
             if os.path.exists(temp_p): os.remove(temp_p)
         except Exception as e:
             logging.error(f"Broadcast rasmida xato: {e}")
             if os.path.exists(temp_p): os.remove(temp_p)
         await u_bot.session.close()
-
-    await state.update_data(p=p); await state.set_state(AdminStates.waiting_broadcast_button); await message.answer("🔗 Tugma (Nom | link) yoki /skip")
+    await state.update_data(p=p)
+    await state.set_state(AdminStates.waiting_broadcast_button)
+    await message.answer("🔗 Tugma (Nom | link) yoki /skip")
 
 @dp.message(AdminStates.waiting_broadcast_button)
 async def bc_fi(message: Message, state: FSMContext):
-    data = await state.get_data(); u_bot = Bot(token=os.getenv("USER_BOT_TOKEN")); kb = None
+    data = await state.get_data()
+    u_bot = Bot(token=os.getenv("USER_BOT_TOKEN"))
+    kb = None
     if "|" in message.text:
-        try: n, l = message.text.split("|"); kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=n.strip(), url=l.strip())]])
+        try:
+            n, l = message.text.split("|")
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=n.strip(), url=l.strip())]])
         except: pass
     users = await db.get_all_users()
     for u_id in users:
@@ -417,10 +460,115 @@ async def bc_fi(message: Message, state: FSMContext):
             else: await u_bot.send_message(u_id, data['txt'], reply_markup=kb, parse_mode="HTML")
             await asyncio.sleep(0.05)
         except: pass
-    await u_bot.session.close(); await message.answer("✅ Tarqatildi!", reply_markup=get_admin_main()); await state.clear()
+    await u_bot.session.close()
+    await message.answer("✅ Tarqatildi!", reply_markup=get_super_admin_menu())
+    await state.clear()
+
+# ===== SUB-ADMIN BOSHQARUVI (faqat Super Admin) =====
+@dp.callback_query(F.data == "manage_subadmins")
+async def manage_subadmins(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Faqat asosiy admin!", show_alert=True)
+        return
+    admins = await db.get_all_sub_admins()
+    txt = f"👨‍🏫 <b>Sub-Adminlar ({len(admins)} ta):</b>\n\n"
+    for i, a in enumerate(admins, 1):
+        name = a.get('full_name') or 'Nomsiz'
+        uid = a.get('user_id')
+        txt += f"{i}. 👤 {name} | 🆔 <code>{uid}</code>\n"
+    if not admins:
+        txt += "Hozircha sub-adminlar yo'q.\n"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Sub-Admin Qo'shish", callback_data="add_subadmin")],
+        [InlineKeyboardButton(text="🗑 Sub-Admin O'chirish", callback_data="remove_subadmin")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_admin")]
+    ])
+    await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data == "add_subadmin")
+async def add_subadmin_start(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Faqat asosiy admin!", show_alert=True)
+        return
+    await state.set_state(AdminStates.waiting_sub_admin_id)
+    await callback.message.edit_text(
+        "👨‍🏫 <b>Yangi Sub-Admin qo'shish:</b>\n\nO'qituvchining Telegram <b>ID raqamini</b> yuboring.\n\n"
+        "<i>💡 ID ni bilish uchun: o'qituvchi @userinfobot ga /start yuboring</i>",
+        parse_mode="HTML"
+    )
+
+@dp.message(AdminStates.waiting_sub_admin_id)
+async def process_subadmin_id(message: Message, state: FSMContext):
+    if not message.text.lstrip('-').isdigit():
+        await message.answer("⚠️ Faqat raqam kiriting! Masalan: <code>123456789</code>", parse_mode="HTML")
+        return
+    await state.update_data(new_sub_id=int(message.text))
+    await state.set_state(AdminStates.waiting_sub_admin_name)
+    await message.answer("✍️ O'qituvchining ismini kiriting (Masalan: <code>Aziz Karimov</code>):", parse_mode="HTML")
+
+@dp.message(AdminStates.waiting_sub_admin_name)
+async def process_subadmin_name(message: Message, state: FSMContext):
+    data = await state.get_data()
+    new_id = data['new_sub_id']
+    name = message.text.strip()
+    await db.add_sub_admin(new_id, name)
+    # Yangi sub-adminga xabar yuboramiz
+    try:
+        await bot.send_message(
+            new_id,
+            f"🎉 <b>Tabriklaymiz, {name}!</b>\n\nSiz ZiyoEdubot admin panelida <b>O'qituvchi</b> sifatida qo'shildingiz.\n\nTest qo'shish va statistikani ko'rish uchun /start bosing!",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logging.warning(f"Sub-adminga xabar yuborib bo'lmadi: {e}")
+    await state.clear()
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👨‍🏫 Sub-Adminlarga qaytish", callback_data="manage_subadmins")],
+        [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="back_to_admin")]
+    ])
+    await message.answer(
+        f"✅ <b>{name}</b> sub-admin sifatida qo'shildi!\n🆔 ID: <code>{new_id}</code>\n\nUga bildirishnoma yuborildi.",
+        reply_markup=kb, parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data == "remove_subadmin")
+async def remove_subadmin_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Faqat asosiy admin!", show_alert=True)
+        return
+    admins = await db.get_all_sub_admins()
+    if not admins:
+        await callback.answer("Sub-adminlar yo'q!", show_alert=True)
+        return
+    kb_list = []
+    for a in admins:
+        name = a.get('full_name') or 'Nomsiz'
+        uid = a.get('user_id')
+        kb_list.append([InlineKeyboardButton(text=f"🗑 {name} ({uid})", callback_data=f"del_sub_{uid}")])
+    kb_list.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="manage_subadmins")])
+    await callback.message.edit_text(
+        "🗑 <b>O'chirish uchun sub-adminni tanlang:</b>",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_list),
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.startswith("del_sub_"))
+async def delete_subadmin(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Faqat asosiy admin!", show_alert=True)
+        return
+    sub_id = int(callback.data.split("_")[2])
+    await db.remove_sub_admin(sub_id)
+    # Sub-adminga xabar
+    try:
+        await bot.send_message(sub_id, "ℹ️ Siz admin paneliga kirishingiz bekor qilindi.")
+    except: pass
+    await callback.answer("✅ Sub-admin o'chirildi!")
+    await manage_subadmins(callback)
 
 async def main():
-    await db.init_db(); await dp.start_polling(bot)
+    await db.init_db()
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
