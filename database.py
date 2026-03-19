@@ -150,7 +150,7 @@ async def get_stats():
 async def get_detailed_stats_by_user():
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        # Har bir foydalanuvchi uchun REYTING (faqat birinchi urinishlar hisoblanadi)
+        # Har bir foydalanuvchi uchun REYTING (faqat har bir testning BIRINCHI urinishi hisoblanadi)
         query = """
             WITH FirstAttempts AS (
                 SELECT user_id, test_id, MIN(id) as first_id
@@ -159,12 +159,16 @@ async def get_detailed_stats_by_user():
             )
             SELECT 
                 u.user_id, u.full_name, u.username, u.phone,
-                COUNT(fa.first_id) as tests_count,
+                COUNT(fa.test_id) as tests_count,
                 SUM(r.score) as total_correct,
                 SUM(r.total) as total_questions
             FROM users u
-            JOIN FirstAttempts fa ON u.user_id = fa.user_id
-            JOIN results r ON fa.first_id = r.id
+            INNER JOIN (
+                SELECT user_id, test_id, MIN(id) as first_id
+                FROM results
+                GROUP BY user_id, test_id
+            ) fa ON u.user_id = fa.user_id
+            INNER JOIN results r ON fa.first_id = r.id
             GROUP BY u.user_id
             ORDER BY tests_count DESC, total_correct DESC
         """
@@ -193,16 +197,19 @@ async def get_all_results_history(limit=50):
 async def get_results_by_test_detailed(test_id):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
+        # Faqat har bir foydalanuvchining BIRINCHI urinishini oladi
         query = """
             SELECT 
                 u.full_name, u.username, u.phone,
                 r.score, r.total, r.timestamp
-            FROM results r
-            JOIN users u ON r.user_id = u.user_id
-            WHERE r.test_id = ?
+            FROM users u
+            JOIN results r ON u.user_id = r.user_id
+            WHERE r.test_id = ? AND r.id IN (
+                SELECT MIN(id) FROM results WHERE test_id = ? GROUP BY user_id
+            )
             ORDER BY r.score DESC, r.timestamp ASC
         """
-        async with db.execute(query, (test_id,)) as cursor:
+        async with db.execute(query, (test_id, test_id)) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
