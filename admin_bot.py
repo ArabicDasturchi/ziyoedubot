@@ -308,11 +308,6 @@ async def adm_confirm_save(callback: CallbackQuery, state: FSMContext):
     await finalize_test(callback.message, state, data['title'], data['content'], data['keys_str'], data['t_type'])
     await callback.answer("✅ Test muvaffaqiyatli saqlandi!")
 
-@dp.message(AdminStates.waiting_test_keys_text)
-async def process_keys_text(message: Message, state: FSMContext):
-    data = await state.get_data(); keys = message.text.lower().replace(" ", "")
-    await finalize_test(message, state, data['title'], data['content'], keys, data['t_type'])
-
 async def finalize_test(message, state, title, content, keys, t_type):
     if not keys:
         await message.answer("⚠️ <b>Kalitlar topilmadi!</b>\nIltimos, javoblarni <code>1a2b3c...</code> formatida yozib yuboring:", parse_mode="HTML")

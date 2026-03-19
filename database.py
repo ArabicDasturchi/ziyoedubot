@@ -150,6 +150,7 @@ async def update_setting(key, value):
 
 async def get_stats():
     async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
         u_count = (await (await db.execute("SELECT COUNT(*) FROM users")).fetchone())[0]
         t_count = (await (await db.execute("SELECT COUNT(*) FROM results")).fetchone())[0]
         
@@ -279,6 +280,13 @@ async def get_all_users():
         async with db.execute("SELECT user_id FROM users") as cursor:
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
+
+async def get_all_users_info():
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM users ORDER BY registered_at DESC") as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
 
 async def get_results_by_test_filtered(test_id, filter_type="all"):
     async with aiosqlite.connect(DB_PATH) as db:
