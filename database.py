@@ -24,9 +24,12 @@ async def init_db():
         await db.execute("""
             CREATE TABLE IF NOT EXISTS tests (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                subject TEXT DEFAULT 'Umumiy',
                 title TEXT,
                 file_id TEXT,
                 keys TEXT,
+                timer INTEGER DEFAULT 0,
+                test_type TEXT DEFAULT 'pdf',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -63,6 +66,12 @@ async def init_db():
             await db.execute("ALTER TABLE users ADD COLUMN phone TEXT")
         except: pass
         try:
+            await db.execute("ALTER TABLE tests ADD COLUMN subject TEXT DEFAULT 'Umumiy'")
+        except: pass
+        try:
+            await db.execute("ALTER TABLE tests ADD COLUMN timer INTEGER DEFAULT 0")
+        except: pass
+        try:
             await db.execute("ALTER TABLE tests ADD COLUMN test_type TEXT DEFAULT 'pdf'")
         except: pass
             
@@ -89,10 +98,10 @@ async def get_user(user_id):
             row = await cursor.fetchone()
             return dict(row) if row else None
 
-async def add_test(title, content, keys, test_type="pdf"):
+async def add_test(title, content, keys, test_type="pdf", subject="Umumiy", timer=0):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("INSERT INTO tests (title, file_id, keys, test_type) VALUES (?, ?, ?, ?)", 
-                         (title, content, keys.lower(), test_type))
+        await db.execute("INSERT INTO tests (title, file_id, keys, test_type, subject, timer) VALUES (?, ?, ?, ?, ?, ?)", 
+                         (title, content, keys.lower(), test_type, subject, timer))
         await db.commit()
 
 async def get_all_tests():
@@ -141,11 +150,31 @@ async def update_setting(key, value):
 
 async def get_stats():
     async with aiosqlite.connect(DB_PATH) as db:
-        u = await db.execute("SELECT COUNT(*) FROM users")
-        u_count = (await u.fetchone())[0]
-        t = await db.execute("SELECT COUNT(*) FROM results")
-        t_count = (await t.fetchone())[0]
-        return u_count, t_count
+        u_count = (await (await db.execute("SELECT COUNT(*) FROM users")).fetchone())[0]
+        t_count = (await (await db.execute("SELECT COUNT(*) FROM results")).fetchone())[0]
+        
+        # Bugun qo'shilganlar
+        today_u = (await (await db.execute("SELECT COUNT(*) FROM users WHERE DATE(registered_at) = DATE('now')")).fetchone())[0]
+        
+        # Haftalik faol foydalanuvchilar (unique users in last 7 days)
+        weekly_active = (await (await db.execute("SELECT COUNT(DISTINCT user_id) FROM results WHERE timestamp > DATETIME('now', '-7 days')")).fetchone())[0]
+        
+        # Eng ko'p yechilgan testlar
+        popular_tests = []
+        async with db.execute("""
+            SELECT t.title, COUNT(r.id) as count 
+            FROM results r JOIN tests t ON r.test_id = t.id 
+            GROUP BY r.test_id ORDER BY count DESC LIMIT 5
+        """) as cursor:
+            popular_tests = [dict(r) for r in (await cursor.fetchall())]
+            
+        return {
+            "total_users": u_count,
+            "total_results": t_count,
+            "today_users": today_u,
+            "weekly_active": weekly_active,
+            "popular_tests": popular_tests
+        }
 
 async def get_detailed_stats_by_user():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -251,10 +280,65 @@ async def get_all_users():
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
 
-async def get_all_users_info():
+async def get_results_by_test_filtered(test_id, filter_type="all"):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT user_id, username, full_name, phone, registered_at FROM users ORDER BY registered_at DESC") as cursor:
+        if filter_type == "first":
+            query = """
+                SELECT u.full_name, u.username, u.phone, r.score, r.total, r.timestamp
+                FROM results r JOIN users u ON r.user_id = u.user_id
+                WHERE r.test_id = ? AND r.id IN (SELECT MIN(id) FROM results WHERE test_id = ? GROUP BY user_id)
+                ORDER BY r.score DESC, r.timestamp ASC
+            """
+        elif filter_type == "last":
+            query = """
+                SELECT u.full_name, u.username, u.phone, r.score, r.total, r.timestamp
+                FROM results r JOIN users u ON r.user_id = u.user_id
+                WHERE r.test_id = ? AND r.id IN (SELECT MAX(id) FROM results WHERE test_id = ? GROUP BY user_id)
+                ORDER BY r.score DESC, r.timestamp DESC
+            """
+        else: # all
+            query = """
+                SELECT u.full_name, u.username, u.phone, r.score, r.total, r.timestamp
+                FROM results r JOIN users u ON r.user_id = u.user_id
+                WHERE r.test_id = ?
+                ORDER BY r.timestamp DESC
+            """
+        async with db.execute(query, (test_id, test_id) if filter_type != "all" else (test_id,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+async def get_user_best_results(user_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        # Guruhlangan natijalar: Har bir test uchun eng yuqori ball va oxirgi sana
+        query = """
+            SELECT t.title, MAX(r.score) as best_score, r.total, MAX(r.timestamp) as last_date
+            FROM results r
+            JOIN tests t ON r.test_id = t.id
+            WHERE r.user_id = ?
+            GROUP BY r.test_id
+            ORDER BY last_date DESC
+        """
+        async with db.execute(query, (user_id,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+async def update_test_keys(test_id, new_keys):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE tests SET keys = ? WHERE id = ?", (new_keys.lower(), test_id))
+        await db.commit()
+
+async def get_test_subjects():
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT DISTINCT subject FROM tests") as cursor:
+            rows = await cursor.fetchall()
+            return [row[0] for row in rows]
+
+async def get_tests_by_subject(subject):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM tests WHERE subject = ? ORDER BY id DESC", (subject,)) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 

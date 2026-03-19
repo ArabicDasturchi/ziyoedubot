@@ -21,9 +21,11 @@ dp = Dispatcher()
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 
 class AdminStates(StatesGroup):
+    waiting_test_subject = State()
     waiting_test_title = State()
     waiting_test_type = State()
     waiting_test_content = State()
+    waiting_test_timer = State()
     waiting_test_keys_mode = State()
     waiting_test_keys_text = State()
     waiting_test_keys_interactive = State()
@@ -33,6 +35,7 @@ class AdminStates(StatesGroup):
     waiting_setting_value = State()
     waiting_sub_admin_id = State()
     waiting_sub_admin_name = State()
+    waiting_edit_keys = State()
 
 def get_super_admin_menu():
     """Asosiy admin uchun to'liq menyu"""
@@ -88,8 +91,14 @@ async def start_add_test(callback: CallbackQuery, state: FSMContext):
     if uid != ADMIN_ID and not await db.is_sub_admin(uid):
         await callback.answer("⛔ Ruxsat yo'q!", show_alert=True)
         return
+    await state.set_state(AdminStates.waiting_test_subject)
+    await callback.message.edit_text("📚 <b>Fan nomini kiriting:</b>\n\nMasalan: <code>Matematika</code>, <code>Ingliz tili</code>, <code>Fizika</code>", parse_mode="HTML")
+
+@dp.message(AdminStates.waiting_test_subject)
+async def process_test_subject(message: Message, state: FSMContext):
+    await state.update_data(subject=message.text.strip())
     await state.set_state(AdminStates.waiting_test_title)
-    await callback.message.edit_text("📄 <b>Yangi test nomini kiriting:</b>", parse_mode="HTML")
+    await message.answer("📄 <b>Test nomini kiriting:</b>\n\nMasalan: <code>1-Variant</code>, <code>Oraliq nazorat</code>", parse_mode="HTML")
 
 @dp.message(AdminStates.waiting_test_title)
 async def process_test_title(message: Message, state: FSMContext):
@@ -171,11 +180,36 @@ async def process_test_content(message: Message, state: FSMContext):
             return
     
     await state.update_data(content=content, keys_dict={}, keys_str="")
+    # Taymer so'rash (ixtiyoriy)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏩ Taymersiz davom etish", callback_data="timer_skip")]
+    ])
+    await message.answer("⏱ <b>Taymer (ixtiyoriy):</b>\n\nTest uchun vaqt limiti bormi? Daqiqa sifatida kiriting (masalan: <code>20</code>).\n\nAgar kerak bo'lmasa, pastdagi tugmani bosing.", reply_markup=kb, parse_mode="HTML")
+    await state.set_state(AdminStates.waiting_test_timer)
+
+@dp.callback_query(F.data == "timer_skip")
+async def timer_skip(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(timer=0)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔢 Belgilash (Interaktiv)", callback_data="key_mode_mark")],
         [InlineKeyboardButton(text="⌨️ Matn ko'rinishida yozish", callback_data="key_mode_text")]
     ])
-    await message.answer("🔑 <b>Javoblar kalitini kiritish:</b>\n\nIstalgan usuldan foydalaning. Ikkala usul ham **sinxron** ishlaydi: interaktivda belgilaganlaringiz matnga, matnda yozganlaringiz interaktivga avtomatik o'tadi.", reply_markup=kb, parse_mode="HTML")
+    await callback.message.edit_text("🔑 <b>Javoblar kalitini kiritish:</b>", reply_markup=kb, parse_mode="HTML")
+    await state.set_state(AdminStates.waiting_test_keys_mode)
+
+@dp.message(AdminStates.waiting_test_timer)
+async def process_timer(message: Message, state: FSMContext):
+    try:
+        timer_val = int(message.text.strip())
+    except:
+        timer_val = 0
+    await state.update_data(timer=timer_val)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔢 Belgilash (Interaktiv)", callback_data="key_mode_mark")],
+        [InlineKeyboardButton(text="⌨️ Matn ko'rinishida yozish", callback_data="key_mode_text")]
+    ])
+    timer_txt = f"⏱ Taymer: <b>{timer_val} daqiqa</b>\n\n" if timer_val > 0 else ""
+    await message.answer(f"{timer_txt}🔑 <b>Javoblar kalitini kiritish:</b>", reply_markup=kb, parse_mode="HTML")
     await state.set_state(AdminStates.waiting_test_keys_mode)
 
 async def show_keys_marking(message, q_num, keys_dict):
@@ -286,14 +320,18 @@ async def finalize_test(message, state, title, content, keys, t_type):
         return
 
     try:
-        await db.add_test(title, content, keys, t_type)
+        data = await state.get_data()
+        subject = data.get('subject', 'Umumiy')
+        timer = data.get('timer', 0)
+        await db.add_test(title, content, keys, t_type, subject=subject, timer=timer)
         questions_count = len(re.findall(r'(\d+)([a-z])', keys))
-        await message.answer(f"✅ <b>Muvaffaqiyatli saqlandi!</b>\n\n📄 Test: {title}\n🔢 Savollar: {questions_count}", parse_mode="HTML")
+        timer_txt = f"\n⏱ Taymer: {timer} daqiqa" if timer > 0 else ""
+        await message.answer(f"✅ <b>Muvaffaqiyatli saqlandi!</b>\n\n📚 Fan: {subject}\n📄 Test: {title}\n🔢 Savollar: {questions_count}{timer_txt}", parse_mode="HTML")
         
         # AVTOMATIK E'LON
         users = await db.get_all_users()
         u_bot = Bot(token=os.getenv("USER_BOT_TOKEN"))
-        bc_text = f"🆕 <b>Yangi test qo'shildi!</b>\n\n📄 Test: <b>{title}</b>\n\nJavoblarni yuborish usulini tanlang:\n\n1️⃣ <b>Belgilash orqali</b>\n2️⃣ <b>Matn ko'rinishida</b>\n\n👇 Marhamat, botga kiring!"
+        bc_text = f"🆕 <b>Yangi test qo'shildi!</b>\n\n📚 Fan: <b>{subject}</b>\n📄 Test: <b>{title}</b>\n\n👇 Marhamat, botga kiring!"
         for u_id in users:
             try: await u_bot.send_message(u_id, bc_text, parse_mode="HTML"); await asyncio.sleep(0.05)
             except: pass
@@ -312,12 +350,22 @@ async def stats_menu(callback: CallbackQuery):
     if uid != ADMIN_ID and not await db.is_sub_admin(uid):
         await callback.answer("⛔ Ruxsat yo'q!", show_alert=True)
         return
-    u, r = await db.get_stats()
+    stats = await db.get_stats()
+    
+    # Popular tests
+    pop_txt = ""
+    for p in stats['popular_tests'][:3]:
+        pop_txt += f"   • {p['title']}: {p['count']} marta\n"
+    if not pop_txt:
+        pop_txt = "   Hali test yechilmagan\n"
     
     txt = (
-        f"📊 <b>Umumiy Statistika</b>\n\n"
-        f"👤 <b>Foydalanuvchilar:</b> {u} ta\n"
-        f"📝 <b>Bajarilgan testlar:</b> {r} ta\n\n"
+        f"📊 <b>Kengaytirilgan Statistika</b>\n\n"
+        f"👤 <b>Jami foydalanuvchilar:</b> {stats['total_users']} ta\n"
+        f"🆕 <b>Bugun qo'shilganlar:</b> {stats['today_users']} ta\n"
+        f"📅 <b>Haftalik faol:</b> {stats['weekly_active']} ta\n"
+        f"📝 <b>Bajarilgan testlar:</b> {stats['total_results']} ta\n\n"
+        f"🔥 <b>Eng mashhur testlar:</b>\n{pop_txt}\n"
         f"<i>Qaysi turdagi hisobotni ko'rmoqchisiz?</i>"
     )
     
@@ -325,7 +373,7 @@ async def stats_menu(callback: CallbackQuery):
         [InlineKeyboardButton(text="🏆 Reyting (Faqat 1-urinish)", callback_data="stats_users")],
         [InlineKeyboardButton(text="📋 Barcha urinishlar (Tarix)", callback_data="stats_history")],
         [InlineKeyboardButton(text="📑 Testlar bo'yicha", callback_data="stats_tests")],
-        [InlineKeyboardButton(text="📥 Natijalarni Excelda yuklab olish", callback_data="stats_excel")],
+        [InlineKeyboardButton(text="📥 Excel yuklab olish", callback_data="stats_excel")],
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_admin")]
     ])
     
@@ -452,16 +500,22 @@ async def stats_tests_list(callback: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("st_test_det_"))
 async def stats_test_details(callback: CallbackQuery):
-    test_id = int(callback.data.split("_")[3])
-    test = await db.get_test(test_id)
-    results = await db.get_results_by_test_detailed(test_id)
+    # Format: st_test_det_{test_id} yoki st_test_det_{test_id}_{filter}
+    parts = callback.data.split("_")
+    test_id = int(parts[3])
+    filter_type = parts[4] if len(parts) > 4 else "first"
     
+    test = await db.get_test(test_id)
     if not test:
         await callback.answer("❌ Test topilmadi!", show_alert=True)
         return
     
-    txt = f"📊 <b>Natija:</b> {test['title']}\n"
-    txt += f"👥 <b>Qatnashchilar:</b> {len(results)} ta\n\n"
+    results = await db.get_results_by_test_filtered(test_id, filter_type)
+    
+    filter_labels = {"first": "🥇 Birinchi urinish", "last": "🏁 Oxirgi urinish", "all": "📋 Barcha urinishlar"}
+    txt = f"📊 <b>{test['title']}</b>\n"
+    txt += f"👥 Qatnashchilar: {len(results)} ta\n"
+    txt += f"📌 Filtr: <b>{filter_labels.get(filter_type, 'Birinchi')}</b>\n\n"
     
     if not results:
         txt += "ℹ️ Ushbu test hali hech kim tomondan ishlanmagan."
@@ -470,13 +524,14 @@ async def stats_test_details(callback: CallbackQuery):
             name = r['full_name'] or r['username'] or "Nomsiz"
             txt += f"{i}. 👤 <b>{name}</b>\n"
             txt += f"   └ ✅ {r['score']}/{r['total']} | 📱 {r['phone'] or '-'}\n"
-            
         if len(results) > 25:
             txt += f"\n<i>...va yana {len(results)-25} ta natija.</i>"
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📑 Testlar ro'yxati", callback_data="stats_tests")],
-        [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="st_global")]
+        [InlineKeyboardButton(text="🥇 1-urinish", callback_data=f"st_test_det_{test_id}_first"),
+         InlineKeyboardButton(text="🏁 Oxirgi", callback_data=f"st_test_det_{test_id}_last"),
+         InlineKeyboardButton(text="📋 Barchasi", callback_data=f"st_test_det_{test_id}_all")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="stats_tests")]
     ])
     
     await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
@@ -507,13 +562,36 @@ async def test_manage(callback: CallbackQuery):
         await callback.answer("❌ Test topilmadi!", show_alert=True)
         return
     
-    txt = f"⚙️ <b>Testni boshqarish:</b>\n\n📄 Nomi: <b>{test['title']}</b>\n🔑 Kalitlar: <code>{test['keys']}</code>"
+    subject = test.get('subject', 'Umumiy')
+    timer = test.get('timer', 0)
+    timer_txt = f"\n⏱ Taymer: <b>{timer} daqiqa</b>" if timer else ""
+    
+    txt = f"⚙️ <b>Testni boshqarish:</b>\n\n📚 Fan: <b>{subject}</b>\n📄 Nomi: <b>{test['title']}</b>\n🔑 Kalitlar: <code>{test['keys']}</code>{timer_txt}"
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Natijalarni ko'rish", callback_data=f"st_test_det_{t_id}")],
+        [InlineKeyboardButton(text="✏️ Kalitlarni tahrirlash", callback_data=f"edit_keys_{t_id}")],
         [InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"confirm_del_single_{t_id}")],
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data="list_tests")]
     ])
     await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("edit_keys_"))
+async def edit_keys_start(callback: CallbackQuery, state: FSMContext):
+    t_id = int(callback.data.split("_")[2])
+    await state.update_data(edit_test_id=t_id)
+    await state.set_state(AdminStates.waiting_edit_keys)
+    await callback.message.edit_text("✏️ <b>Yangi kalitlarni kiriting:</b>\n\nFormat: <code>1a2b3c...</code>", parse_mode="HTML")
+
+@dp.message(AdminStates.waiting_edit_keys)
+async def process_edit_keys(message: Message, state: FSMContext):
+    data = await state.get_data()
+    t_id = data['edit_test_id']
+    new_keys = message.text.lower().replace(" ", "")
+    await db.update_test_keys(t_id, new_keys)
+    questions_count = len(re.findall(r'(\d+)([a-z])', new_keys))
+    menu = await get_user_menu(message.from_user.id)
+    await message.answer(f"✅ <b>Kalitlar yangilandi!</b>\n🔢 Savollar: {questions_count}\n🔑 Yangi: <code>{new_keys}</code>", reply_markup=menu, parse_mode="HTML")
+    await state.clear()
 
 @dp.callback_query(F.data.startswith("confirm_del_single_"))
 async def confirm_del_single(callback: CallbackQuery):
@@ -590,7 +668,16 @@ async def show_settings(callback: CallbackQuery):
         await callback.answer("⛔ Bu funksiya faqat asosiy admin uchun!", show_alert=True)
         return
     ch = await db.get_setting("channels")
-    text = f"⚙️ <b>Sozlamalar:</b>\n\n📢 Kanallar:\n<code>{ch}</code>"
+    tests_count = len(await db.get_all_tests())
+    subjects = await db.get_test_subjects()
+    subjects_txt = ", ".join(subjects) if subjects else "Yo'q"
+    
+    text = (
+        f"⚙️ <b>Sozlamalar paneli</b>\n\n"
+        f"📢 <b>Majburiy kanallar:</b>\n<code>{ch}</code>\n\n"
+        f"📚 <b>Fanlar:</b> {subjects_txt}\n"
+        f"📝 <b>Jami testlar:</b> {tests_count} ta"
+    )
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📢 Kanallarni tahrirlash", callback_data="set_ch")],
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_admin")]

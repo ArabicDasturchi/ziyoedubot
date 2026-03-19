@@ -142,14 +142,37 @@ async def process_check_sub(callback: CallbackQuery, state: FSMContext):
 
 @dp.message(F.text == "📝 Mavjud Testlar")
 async def show_tests(message: Message, state: FSMContext):
-    tests = await db.get_all_tests()
-    if not tests:
+    subjects = await db.get_test_subjects()
+    if not subjects:
         await message.answer("📂 Hozircha mavjud testlar yo'q.")
         return
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"📄 {t['title']}", callback_data=f"view_{t['id']}")] for t in tests
+        [InlineKeyboardButton(text=f"📚 {s}", callback_data=f"subj_{s}")] for s in subjects
     ])
-    await message.answer("👇 Mavjud diagnostik testlar:", reply_markup=kb)
+    await message.answer("👇 <b>Fan tanlang:</b>", reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("subj_"))
+async def show_subject_tests(callback: CallbackQuery, state: FSMContext):
+    subject = callback.data[5:]  # "subj_Matematika" -> "Matematika"
+    tests = await db.get_tests_by_subject(subject)
+    if not tests:
+        await callback.answer("📂 Bu fanda testlar yo'q!", show_alert=True)
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"📄 {t['title']}", callback_data=f"view_{t['id']}")] for t in tests
+    ] + [[InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_subjects")]])
+    await callback.message.edit_text(f"📚 <b>{subject}</b>\n\n👇 Testni tanlang:", reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data == "back_subjects")
+async def back_subjects(callback: CallbackQuery, state: FSMContext):
+    subjects = await db.get_test_subjects()
+    if not subjects:
+        await callback.answer("📂 Testlar yo'q!", show_alert=True)
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"📚 {s}", callback_data=f"subj_{s}")] for s in subjects
+    ])
+    await callback.message.edit_text("👇 <b>Fan tanlang:</b>", reply_markup=kb, parse_mode="HTML")
 
 @dp.callback_query(F.data.startswith("view_"))
 async def view_test(callback: CallbackQuery, state: FSMContext):
@@ -407,15 +430,17 @@ async def calculate_and_send_results(chat_id, user_id, test_id, user_ans_str, st
 
 @dp.message(F.text == "📊 Mening Natijalarim")
 async def show_results(message: Message):
-    res = await db.get_user_results(message.from_user.id)
+    res = await db.get_user_best_results(message.from_user.id)
     if not res:
         await message.answer("📊 Sizda hali natijalar yo'q.")
         return
         
-    txt = "📊 <b>Oxirgi natijalaringiz:</b>\n\n"
-    for r in res[:10]: 
-        # r['title'], r['score'], r['total'] dan foydalanamiz
-        txt += f"📌 {r['title']}: <b>{r['score']}/{r['total']}</b>\n"
+    txt = "📊 <b>Natijalaringiz (Eng yaxshi ball):</b>\n\n"
+    for r in res[:15]: 
+        percent = (r['best_score'] / r['total'] * 100) if r['total'] > 0 else 0
+        bar = "█" * int(percent / 10) + "░" * (10 - int(percent / 10))
+        txt += f"📌 <b>{r['title']}</b>\n"
+        txt += f"   {bar} {r['best_score']}/{r['total']} ({percent:.0f}%)\n\n"
     await message.answer(txt, parse_mode="HTML")
 
 @dp.message(F.text == "👤 Profilim")
