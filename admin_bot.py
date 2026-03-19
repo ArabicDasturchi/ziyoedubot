@@ -8,7 +8,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
 from dotenv import load_dotenv
-import pandas as pd
+from openpyxl import Workbook
+from datetime import datetime
 import database as db
 
 load_dotenv()
@@ -361,20 +362,36 @@ async def download_results_excel(callback: CallbackQuery):
         await callback.message.answer("⚠️ Hali natijalar mavjud emas!")
         return
     
-    # DataFrame yaratamiz
-    df = pd.DataFrame(data)
+    # openpyxl bilan Excel yaratamiz (pandas kerak emas!)
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Natijalar"
     
-    # Sarlavhalarni chiroyli qilamiz
-    df.columns = ["Ism Familiya", "Username", "Telefon", "Test Nomi", "Ball", "Jami savol", "Sana"]
+    # Sarlavhalar
+    headers = ["Ism Familiya", "Username", "Telefon", "Test Nomi", "Ball", "Jami savol", "Sana"]
+    ws.append(headers)
     
-    # Excel faylga saqlaymiz
+    # Ma'lumotlarni yozamiz
+    for row in data:
+        ws.append([
+            row.get('full_name', ''),
+            row.get('username', ''),
+            row.get('phone', ''),
+            row.get('test_title', ''),
+            row.get('score', 0),
+            row.get('total', 0),
+            row.get('timestamp', '')
+        ])
+    
+    # Faylga saqlaymiz
     file_path = "Test_Natijalari.xlsx"
-    df.to_excel(file_path, index=False)
+    wb.save(file_path)
     
+    now = datetime.now().strftime('%Y-%m-%d %H:%M')
     # Faylni yuboramiz
     await callback.message.answer_document(
         document=FSInputFile(file_path),
-        caption=f"📊 <b>Barcha test natijalari</b>\n\nJami yozuvlar: {len(data)} ta\nSana: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}",
+        caption=f"📊 <b>Barcha test natijalari</b>\n\nJami yozuvlar: {len(data)} ta\nSana: {now}",
         parse_mode="HTML"
     )
     
