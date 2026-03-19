@@ -378,7 +378,8 @@ async def calculate_and_send_results(chat_id, user_id, test_id, user_ans_str, st
                 score += 1
                 details += f"✅ {k}-{v.upper()}\n"
             else:
-                details += f"❌ {k}-{v.upper()} (To'g'ri: {correct_map[k_int].upper()})\n"
+                # To'g'ri javobni foydalanuvchiga ko'rsatmaymiz (so'rovga ko'ra)
+                details += f"❌ {k}-{v.upper()}\n"
     
     total = len(correct_map)
     percent = (score / total * 100) if total > 0 else 0

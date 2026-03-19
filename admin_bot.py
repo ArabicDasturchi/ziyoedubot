@@ -469,12 +469,11 @@ async def list_tests(callback: CallbackQuery):
     tests = await db.get_all_tests()
     if not tests: await callback.answer("📂 Testlar yo'q!", show_alert=True); return
     
-    txt = f"🗂 <b>Barcha testlar ({len(tests)} ta):</b>\n\nTest ustiga bossangiz natijalarni ko'rasiz, 🗑 orqali o'chirasiz:"
+    txt = f"🗂 <b>Barcha testlar ({len(tests)} ta):</b>\n\nBoshqarish uchun test ustiga bosing:"
     kb = []
     for i, t in enumerate(tests[:25], 1): 
         kb.append([
-            InlineKeyboardButton(text=f"📋 {i}. {t['title'][:20]}", callback_data=f"st_test_det_{t['id']}"),
-            InlineKeyboardButton(text="🗑", callback_data=f"del_test_{t['id']}")
+            InlineKeyboardButton(text=f"📋 {i}. {t['title'][:30]}", callback_data=f"test_manage_{t['id']}")
         ])
     
     if len(tests) > 1:
@@ -482,6 +481,31 @@ async def list_tests(callback: CallbackQuery):
     
     kb.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_admin")])
     await callback.message.edit_text(txt, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("test_manage_"))
+async def test_manage(callback: CallbackQuery):
+    t_id = int(callback.data.split("_")[2])
+    test = await db.get_test(t_id)
+    if not test:
+        await callback.answer("❌ Test topilmadi!", show_alert=True)
+        return
+    
+    txt = f"⚙️ <b>Testni boshqarish:</b>\n\n📄 Nomi: <b>{test['title']}</b>\n🔑 Kalitlar: <code>{test['keys']}</code>"
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Natijalarni ko'rish", callback_data=f"st_test_det_{t_id}")],
+        [InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"confirm_del_single_{t_id}")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="list_tests")]
+    ])
+    await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("confirm_del_single_"))
+async def confirm_del_single(callback: CallbackQuery):
+    t_id = int(callback.data.split("_")[3])
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Ha, o'chirilsin", callback_data=f"del_test_{t_id}")],
+        [InlineKeyboardButton(text="❌ Bekor qilish", callback_data=f"test_manage_{t_id}")]
+    ])
+    await callback.message.edit_text("⚠️ <b>Ushbu testni o'chirishni tasdiqlaysizmi?</b>", reply_markup=kb, parse_mode="HTML")
 
 @dp.callback_query(F.data == "confirm_del_all")
 async def confirm_del_all(callback: CallbackQuery):
