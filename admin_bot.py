@@ -6,9 +6,9 @@ from aiogram import Bot, Dispatcher, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
 from dotenv import load_dotenv
-
+import pandas as pd
 import database as db
 
 load_dotenv()
@@ -323,10 +323,45 @@ async def stats_menu(callback: CallbackQuery):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👥 Foydalanuvchilar bo'yicha", callback_data="stats_users")],
         [InlineKeyboardButton(text="📑 Testlar bo'yicha", callback_data="stats_tests")],
+        [InlineKeyboardButton(text="📥 Natijalarni yuklab olish (Excel)", callback_data="stats_excel")],
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_admin")]
     ])
     
     await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data == "stats_excel")
+async def download_results_excel(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID and not await db.is_sub_admin(callback.from_user.id):
+        await callback.answer("⛔ Ruxsat yo'q!", show_alert=True)
+        return
+    
+    await callback.answer("⏳ Fayl tayyorlanmoqda, kuting...")
+    
+    data = await db.get_all_results_for_excel()
+    if not data:
+        await callback.message.answer("⚠️ Hali natijalar mavjud emas!")
+        return
+    
+    # DataFrame yaratamiz
+    df = pd.DataFrame(data)
+    
+    # Sarlavhalarni chiroyli qilamiz
+    df.columns = ["Ism Familiya", "Username", "Telefon", "Test Nomi", "Ball", "Jami savol", "Sana"]
+    
+    # Excel faylga saqlaymiz
+    file_path = "Test_Natijalari.xlsx"
+    df.to_excel(file_path, index=False)
+    
+    # Faylni yuboramiz
+    await callback.message.answer_document(
+        document=FSInputFile(file_path),
+        caption=f"📊 <b>Barcha test natijalari</b>\n\nJami yozuvlar: {len(data)} ta\nSana: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')}",
+        parse_mode="HTML"
+    )
+    
+    # Vaqtinchalik faylni o'chiramiz
+    if os.path.exists(file_path):
+        os.remove(file_path)
 
 @dp.callback_query(F.data == "stats_users")
 async def stats_users(callback: CallbackQuery):
@@ -415,10 +450,13 @@ async def list_tests(callback: CallbackQuery):
     tests = await db.get_all_tests()
     if not tests: await callback.answer("📂 Testlar yo'q!", show_alert=True); return
     
-    txt = f"🗂 <b>Barcha testlar ({len(tests)} ta):</b>\n\nQuyidagilardan birini o'chirishingiz mumkin:"
+    txt = f"🗂 <b>Barcha testlar ({len(tests)} ta):</b>\n\nTest ustiga bossangiz natijalarni ko'rasiz, 🗑 orqali o'chirasiz:"
     kb = []
-    for i, t in enumerate(tests[:20], 1): # Tartib raqam bilan ko'rsatamiz
-        kb.append([InlineKeyboardButton(text=f"🗑 {i}. {t['title'][:25]}", callback_data=f"del_test_{t['id']}")])
+    for i, t in enumerate(tests[:25], 1): 
+        kb.append([
+            InlineKeyboardButton(text=f"📋 {i}. {t['title'][:20]}", callback_data=f"st_test_det_{t['id']}"),
+            InlineKeyboardButton(text="🗑", callback_data=f"del_test_{t['id']}")
+        ])
     
     if len(tests) > 1:
         kb.append([InlineKeyboardButton(text="💣 BARCHASINI O'CHIRISH", callback_data="confirm_del_all")])

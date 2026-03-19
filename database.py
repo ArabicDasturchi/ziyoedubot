@@ -182,6 +182,23 @@ async def get_results_by_test_detailed(test_id):
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 
+async def get_all_results_for_excel():
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        query = """
+            SELECT 
+                u.full_name, u.username, u.phone,
+                t.title as test_title,
+                r.score, r.total, r.timestamp
+            FROM results r
+            JOIN users u ON r.user_id = u.user_id
+            JOIN tests t ON r.test_id = t.id
+            ORDER BY r.timestamp DESC
+        """
+        async with db.execute(query) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
 async def delete_test(test_id):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM tests WHERE id = ?", (test_id,))
