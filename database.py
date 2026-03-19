@@ -150,19 +150,43 @@ async def get_stats():
 async def get_detailed_stats_by_user():
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        # Har bir foydalanuvchi uchun umumiy statistika
+        # Har bir foydalanuvchi uchun REYTING (faqat birinchi urinishlar hisoblanadi)
         query = """
+            WITH FirstAttempts AS (
+                SELECT user_id, test_id, MIN(id) as first_id
+                FROM results
+                GROUP BY user_id, test_id
+            )
             SELECT 
                 u.user_id, u.full_name, u.username, u.phone,
-                COUNT(r.id) as tests_count,
+                COUNT(fa.first_id) as tests_count,
                 SUM(r.score) as total_correct,
                 SUM(r.total) as total_questions
             FROM users u
-            LEFT JOIN results r ON u.user_id = r.user_id
+            JOIN FirstAttempts fa ON u.user_id = fa.user_id
+            JOIN results r ON fa.first_id = r.id
             GROUP BY u.user_id
-            ORDER BY tests_count DESC
+            ORDER BY tests_count DESC, total_correct DESC
         """
         async with db.execute(query) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+async def get_all_results_history(limit=50):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        query = """
+            SELECT 
+                u.full_name, u.username,
+                t.title as test_title,
+                r.score, r.total, r.timestamp
+            FROM results r
+            JOIN users u ON r.user_id = u.user_id
+            JOIN tests t ON r.test_id = t.id
+            ORDER BY r.timestamp DESC
+            LIMIT ?
+        """
+        async with db.execute(query, (limit,)) as cursor:
             rows = await cursor.fetchall()
             return [dict(r) for r in rows]
 

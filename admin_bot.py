@@ -321,12 +321,31 @@ async def stats_menu(callback: CallbackQuery):
     )
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👥 Foydalanuvchilar bo'yicha", callback_data="stats_users")],
+        [InlineKeyboardButton(text="🏆 Reyting (Faqat 1-urinish)", callback_data="stats_users")],
+        [InlineKeyboardButton(text="📋 Barcha urinishlar (Tarix)", callback_data="stats_history")],
         [InlineKeyboardButton(text="📑 Testlar bo'yicha", callback_data="stats_tests")],
-        [InlineKeyboardButton(text="📥 Natijalarni yuklab olish (Excel)", callback_data="stats_excel")],
+        [InlineKeyboardButton(text="📥 Natijalarni Excelda yuklab olish", callback_data="stats_excel")],
         [InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_admin")]
     ])
     
+    await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data == "stats_history")
+async def stats_history(callback: CallbackQuery):
+    history = await db.get_all_results_history(limit=50) # Oxirgi 50 ta
+    if not history:
+        await callback.answer("⚠️ Tarix hali mavjud emas!", show_alert=True)
+        return
+    
+    txt = "📋 <b>Oxirgi natijalar (Barcha urinishlar):</b>\n\n"
+    for r in history:
+        name = r['full_name'] or r['username'] or "Nomsiz"
+        txt += f"👤 <b>{name}</b>\n"
+        txt += f"   └ {r['test_title'][:15]}.. | ✅ {r['score']}/{r['total']} | 🕒 {r['timestamp'][11:16]}\n"
+        
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="st_global")]
+    ])
     await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
 
 @dp.callback_query(F.data == "stats_excel")
