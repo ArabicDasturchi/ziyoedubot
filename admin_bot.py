@@ -306,14 +306,109 @@ async def finalize_test(message, state, title, content, keys, t_type):
 
 # --- QOLGANLAR ---
 @dp.callback_query(F.data == "st_global")
-async def stats(callback: CallbackQuery):
+async def stats_menu(callback: CallbackQuery):
     uid = callback.from_user.id
     if uid != ADMIN_ID and not await db.is_sub_admin(uid):
         await callback.answer("⛔ Ruxsat yo'q!", show_alert=True)
         return
     u, r = await db.get_stats()
-    menu = await get_user_menu(uid)
-    await callback.message.edit_text(f"📊 <b>Statistika:</b>\n\n👤 Foydalanuvchilar: {u}\n📝 Yechilgan testlar: {r}", reply_markup=menu, parse_mode="HTML")
+    
+    txt = (
+        f"📊 <b>Umumiy Statistika</b>\n\n"
+        f"👤 <b>Foydalanuvchilar:</b> {u} ta\n"
+        f"📝 <b>Bajarilgan testlar:</b> {r} ta\n\n"
+        f"<i>Qaysi turdagi hisobotni ko'rmoqchisiz?</i>"
+    )
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Foydalanuvchilar bo'yicha", callback_data="stats_users")],
+        [InlineKeyboardButton(text="📑 Testlar bo'yicha", callback_data="stats_tests")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="back_to_admin")]
+    ])
+    
+    await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data == "stats_users")
+async def stats_users(callback: CallbackQuery):
+    users_data = await db.get_detailed_stats_by_user()
+    if not users_data:
+        await callback.answer("⚠️ Ma'lumot topilmadi!", show_alert=True)
+        return
+    
+    txt = "👥 <b>Foydalanuvchilar reytingi:</b>\n\n"
+    # Faqat test bajarganlarni ajratib olamiz
+    active_users = [u for u in users_data if u['tests_count'] > 0]
+    
+    if not active_users:
+        txt = "👥 <b>Foydalanuvchilar:</b>\n\nHali echilgan testlar yo'q."
+    else:
+        for i, u in enumerate(active_users[:20], 1): # Top 20
+            name = u['full_name'] or u['username'] or f"ID: {u['user_id']}"
+            corr = u['total_correct'] or 0
+            ques = u['total_questions'] or 0
+            err = ques - corr
+            count = u['tests_count']
+            
+            medal = "🥇" if i == 1 else "🥈" if i == 2 else "🥉" if i == 3 else "👤"
+            txt += f"{medal} <b>{name}</b>\n"
+            txt += f"   └ 📝 {count} ta test | ✅ {corr} | ❌ {err}\n\n"
+            
+        if len(active_users) > 20:
+            txt += f"<i>...va yana {len(active_users)-20} ta faol foydalanuvchi.</i>"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📑 Testlar bo'yicha", callback_data="stats_tests")],
+        [InlineKeyboardButton(text="🔙 Orqaga", callback_data="st_global")]
+    ])
+    
+    await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
+
+@dp.callback_query(F.data == "stats_tests")
+async def stats_tests_list(callback: CallbackQuery):
+    tests = await db.get_all_tests()
+    if not tests:
+        await callback.answer("📂 Testlar mavjud emas!", show_alert=True)
+        return
+    
+    txt = "📑 <b>Testlar bo'yicha statistika:</b>\n\nNatijalarni ko'rish uchun testni tanlang:"
+    kb = []
+    
+    for t in tests[:25]:
+        kb.append([InlineKeyboardButton(text=f"📋 {t['title'][:25]}", callback_data=f"st_test_det_{t['id']}")])
+    
+    kb.append([InlineKeyboardButton(text="🔙 Orqaga", callback_data="st_global")])
+    await callback.message.edit_text(txt, reply_markup=InlineKeyboardMarkup(inline_keyboard=kb), parse_mode="HTML")
+
+@dp.callback_query(F.data.startswith("st_test_det_"))
+async def stats_test_details(callback: CallbackQuery):
+    test_id = int(callback.data.split("_")[3])
+    test = await db.get_test(test_id)
+    results = await db.get_results_by_test_detailed(test_id)
+    
+    if not test:
+        await callback.answer("❌ Test topilmadi!", show_alert=True)
+        return
+    
+    txt = f"📊 <b>Natija:</b> {test['title']}\n"
+    txt += f"👥 <b>Qatnashchilar:</b> {len(results)} ta\n\n"
+    
+    if not results:
+        txt += "ℹ️ Ushbu test hali hech kim tomondan ishlanmagan."
+    else:
+        for i, r in enumerate(results[:25], 1):
+            name = r['full_name'] or r['username'] or "Nomsiz"
+            txt += f"{i}. 👤 <b>{name}</b>\n"
+            txt += f"   └ ✅ {r['score']}/{r['total']} | 📱 {r['phone'] or '-'}\n"
+            
+        if len(results) > 25:
+            txt += f"\n<i>...va yana {len(results)-25} ta natija.</i>"
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📑 Testlar ro'yxati", callback_data="stats_tests")],
+        [InlineKeyboardButton(text="🔙 Bosh menyu", callback_data="st_global")]
+    ])
+    
+    await callback.message.edit_text(txt, reply_markup=kb, parse_mode="HTML")
 
 @dp.callback_query(F.data == "list_tests")
 async def list_tests(callback: CallbackQuery):

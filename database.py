@@ -147,6 +147,41 @@ async def get_stats():
         t_count = (await t.fetchone())[0]
         return u_count, t_count
 
+async def get_detailed_stats_by_user():
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        # Har bir foydalanuvchi uchun umumiy statistika
+        query = """
+            SELECT 
+                u.user_id, u.full_name, u.username, u.phone,
+                COUNT(r.id) as tests_count,
+                SUM(r.score) as total_correct,
+                SUM(r.total) as total_questions
+            FROM users u
+            LEFT JOIN results r ON u.user_id = r.user_id
+            GROUP BY u.user_id
+            ORDER BY tests_count DESC
+        """
+        async with db.execute(query) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
+async def get_results_by_test_detailed(test_id):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        query = """
+            SELECT 
+                u.full_name, u.username, u.phone,
+                r.score, r.total, r.timestamp
+            FROM results r
+            JOIN users u ON r.user_id = u.user_id
+            WHERE r.test_id = ?
+            ORDER BY r.score DESC, r.timestamp ASC
+        """
+        async with db.execute(query, (test_id,)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
+
 async def delete_test(test_id):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM tests WHERE id = ?", (test_id,))
